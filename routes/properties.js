@@ -1,11 +1,11 @@
 const express = require("express");
-const { body, validationResult, query } = require("express-validator");
+const mongoose = require("mongoose");
+const { body, validationResult } = require("express-validator");
 const Property = require("../models/Property");
 const auth = require("../middleware/auth");
 const { getCache, setCache, deleteCache } = require("../utils/cache");
 
 const router = express.Router();
-
 
 router.get("/", async (req, res) => {
   try {
@@ -36,7 +36,6 @@ router.get("/", async (req, res) => {
     }
 
     const filter = { isActive: true };
-
 
     if (type) filter.type = type;
     if (city) filter.city = new RegExp(city, "i");
@@ -86,7 +85,7 @@ router.get("/", async (req, res) => {
       },
     };
 
-    await setCache(cacheKey, result, 300); 
+    await setCache(cacheKey, result, 300);
 
     res.json(result);
   } catch (error) {
@@ -98,23 +97,30 @@ router.get("/", async (req, res) => {
 
 router.get("/:id", async (req, res) => {
   try {
-    const cacheKey = `property:${req.params.id}`;
+    const { id } = req.params;
+    const cacheKey = `property:${id}`;
     const cachedData = await getCache(cacheKey);
 
     if (cachedData) {
       return res.json(cachedData);
     }
 
-    const property = await Property.findOne({
-      $or: [{ _id: req.params.id }, { id: req.params.id }],
-      isActive: true,
-    }).populate("createdBy", "name email");
+    const query = { isActive: true, $or: [] };
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      query.$or.push({ _id: id });
+    }
+    query.$or.push({ id });
+
+    const property = await Property.findOne(query).populate(
+      "createdBy",
+      "name email"
+    );
 
     if (!property) {
       return res.status(404).json({ message: "Property not found" });
     }
 
-    await setCache(cacheKey, property, 600); 
+    await setCache(cacheKey, property, 600);
 
     res.json(property);
   } catch (error) {
@@ -123,7 +129,6 @@ router.get("/:id", async (req, res) => {
       .json({ message: "Error fetching property", error: error.message });
   }
 });
-
 
 router.post(
   "/",
@@ -168,9 +173,7 @@ router.post(
 
       const property = new Property(propertyData);
       await property.save();
-
       await property.populate("createdBy", "name email");
-
 
       await deleteCache("properties:*");
 
@@ -186,13 +189,16 @@ router.post(
   }
 );
 
-
 router.put("/:id", auth, async (req, res) => {
   try {
-    const property = await Property.findOne({
-      $or: [{ _id: req.params.id }, { id: req.params.id }],
-      isActive: true,
-    });
+    const { id } = req.params;
+    const query = { isActive: true, $or: [] };
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      query.$or.push({ _id: id });
+    }
+    query.$or.push({ id });
+
+    const property = await Property.findOne(query);
 
     if (!property) {
       return res.status(404).json({ message: "Property not found" });
@@ -204,14 +210,12 @@ router.put("/:id", auth, async (req, res) => {
         .json({ message: "Not authorized to update this property" });
     }
 
-    const updatedProperty = await Property.findOneAndUpdate(
-      { $or: [{ _id: req.params.id }, { id: req.params.id }] },
-      req.body,
-      { new: true, runValidators: true }
-    ).populate("createdBy", "name email");
+    const updatedProperty = await Property.findOneAndUpdate(query, req.body, {
+      new: true,
+      runValidators: true,
+    }).populate("createdBy", "name email");
 
-   
-    await deleteCache(`property:${req.params.id}`);
+    await deleteCache(`property:${id}`);
     await deleteCache("properties:*");
 
     res.json({
@@ -225,13 +229,16 @@ router.put("/:id", auth, async (req, res) => {
   }
 });
 
-
 router.delete("/:id", auth, async (req, res) => {
   try {
-    const property = await Property.findOne({
-      $or: [{ _id: req.params.id }, { id: req.params.id }],
-      isActive: true,
-    });
+    const { id } = req.params;
+    const query = { isActive: true, $or: [] };
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      query.$or.push({ _id: id });
+    }
+    query.$or.push({ id });
+
+    const property = await Property.findOne(query);
 
     if (!property) {
       return res.status(404).json({ message: "Property not found" });
@@ -243,14 +250,9 @@ router.delete("/:id", auth, async (req, res) => {
         .json({ message: "Not authorized to delete this property" });
     }
 
-    
-    await Property.findOneAndUpdate(
-      { $or: [{ _id: req.params.id }, { id: req.params.id }] },
-      { isActive: false }
-    );
+    await Property.findOneAndUpdate(query, { isActive: false });
 
-    
-    await deleteCache(`property:${req.params.id}`);
+    await deleteCache(`property:${id}`);
     await deleteCache("properties:*");
 
     res.json({ message: "Property deleted successfully" });
